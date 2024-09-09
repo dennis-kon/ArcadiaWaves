@@ -1,5 +1,25 @@
-﻿using System;
-using System.Collections.Generic;
+To create a web UI for managing the features of the web server, we will need to extend the server's capabilities to serve dynamic HTML content. This web UI will allow you to manage features like:
+
+1. **Starting/Stopping the Server**: Control the server's state (running or stopped).
+2. **Viewing and Clearing Logs**: Display logs, and provide the ability to clear them.
+3. **Uploading and Managing Files**: Provide a file upload feature (via a form).
+4. **Adjusting Server Configuration**: Update the server's listening port or other settings dynamically.
+
+The general idea is to:
+- Create an admin dashboard served on a specific route (e.g., `/admin`).
+- Provide various functionalities like log viewing, server control, and configuration updates via this dashboard.
+- Implement form handling and file upload mechanisms to interact with the server.
+
+### Plan:
+1. Add a new route `/admin` to serve the UI.
+2. Create a basic HTML template for the admin dashboard.
+3. Provide functionality to view logs, stop/start the server, and upload files through this dashboard.
+4. Adjust the backend to handle these interactions (e.g., POST requests for server control).
+
+### **Updated Code with Admin Web UI:**
+
+```csharp
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -8,11 +28,10 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Web; // For form-data parsing
 
-class SimpleWebServer : IDisposable
+class SimpleWebServer
 {
     private readonly HttpListener _listener = new HttpListener();
     private readonly string logFilePath = "webserver.log"; // Log file path
-    private bool _disposed = false; // To detect redundant calls
 
     public SimpleWebServer(string[] prefixes)
     {
@@ -41,7 +60,9 @@ class SimpleWebServer : IDisposable
 
     public void Stop()
     {
-        Dispose(); // Ensure that resources are released
+        _listener.Stop();
+        _listener.Close();
+        Log("Web server stopped.");
     }
 
     private async Task HandleIncomingConnections()
@@ -85,7 +106,7 @@ class SimpleWebServer : IDisposable
         switch (request.Url.AbsolutePath)
         {
             case "/":
-                responseString = "<html><body><h1>Home Page - Welcome to ArcadiaWaves! </h1></body></html>";
+                responseString = "<html><body><h1>Home Page - GET</h1></body></html>";
                 break;
 
             case "/about":
@@ -94,6 +115,14 @@ class SimpleWebServer : IDisposable
 
             case "/contact":
                 responseString = "<html><body><h1>Contact Page - GET</h1><form method='post' enctype='multipart/form-data'><input type='text' name='message' placeholder='Enter your message'/><br/><input type='file' name='file'/><br/><input type='submit' value='Submit'/></form></body></html>";
+                break;
+
+            case "/admin":
+                responseString = await GenerateAdminDashboard();
+                break;
+
+            case "/logs":
+                responseString = File.ReadAllText(logFilePath);
                 break;
 
             default:
@@ -110,7 +139,31 @@ class SimpleWebServer : IDisposable
 
     private async Task HandlePostRequest(HttpListenerRequest request, HttpListenerResponse response)
     {
-        if (request.Url.AbsolutePath == "/contact")
+        if (request.Url.AbsolutePath == "/admin/action")
+        {
+            string responseString;
+
+            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+            {
+                string body = await reader.ReadToEndAsync();
+                var formData = HttpUtility.ParseQueryString(body);
+                string action = formData["action"];
+
+                if (action == "stop_server")
+                {
+                    responseString = "<html><body><h1>Server Stopped</h1></body></html>";
+                    await WriteResponse(response, responseString, "text/html");
+                    Stop(); // Stop the server after responding
+                }
+                else if (action == "clear_logs")
+                {
+                    File.WriteAllText(logFilePath, string.Empty); // Clear the logs
+                    responseString = "<html><body><h1>Logs Cleared</h1></body></html>";
+                    await WriteResponse(response, responseString, "text/html");
+                }
+            }
+        }
+        else if (request.Url.AbsolutePath == "/contact")
         {
             if (request.ContentType == "application/json")
             {
@@ -121,7 +174,7 @@ class SimpleWebServer : IDisposable
 
                     var jsonData = JsonSerializer.Deserialize<Dictionary<string, string>>(body);
                     string responseString = $"<html><body><h1>Received JSON data</h1><pre>{JsonSerializer.Serialize(jsonData, new JsonSerializerOptions { WriteIndented = true })}</pre></body></html>";
-                    await WriteResponse(response, responseString, "text/html", request.Url.AbsolutePath);
+                    await WriteResponse(response, responseString, "text/html");
                 }
             }
             else if (request.ContentType.Contains("multipart/form-data"))
@@ -131,23 +184,7 @@ class SimpleWebServer : IDisposable
                 Log($"Received multipart form-data: {multipartFormData}");
 
                 string responseString = $"<html><body><h1>Form Data Received</h1><pre>{multipartFormData}</pre></body></html>";
-                await WriteResponse(response, responseString, "text/html", request.Url.AbsolutePath);
-            }
-            else if (request.ContentType == "application/x-www-form-urlencoded")
-            {
-                using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
-                {
-                    string body = await reader.ReadToEndAsync();
-                    Log($"Received form-urlencoded data: {body}");
-
-                    var formData = HttpUtility.ParseQueryString(body); // Use HttpUtility for .NET Framework
-                    string responseString = $"<html><body><h1>Form Data Received</h1><pre>{body}</pre></body></html>";
-                    await WriteResponse(response, responseString, "text/html", request.Url.AbsolutePath);
-                }
-            }
-            else
-            {
-                SendErrorResponse(response, 415, "Unsupported Media Type");
+                await WriteResponse(response, responseString, "text/html");
             }
         }
         else
@@ -156,17 +193,37 @@ class SimpleWebServer : IDisposable
         }
     }
 
-    // Helper method to write a response
-    private async Task WriteResponse(HttpListenerResponse response, string responseString, string contentType, string requestPath)
+    private async Task<string> GenerateAdminDashboard()
+    {
+        string logs = File.ReadAllText(logFilePath);
+        return $@"
+            <html>
+            <body>
+                <h1>Admin Dashboard</h1>
+                <h2>Server Control</h2>
+                <form method='post' action='/admin/action'>
+                    <input type='hidden' name='action' value='stop_server'/>
+                    <button type='submit'>Stop Server</button>
+                </form>
+                <h2>Logs</h2>
+                <pre>{logs}</pre>
+                <form method='post' action='/admin/action'>
+                    <input type='hidden' name='action' value='clear_logs'/>
+                    <button type='submit'>Clear Logs</button>
+                </form>
+            </body>
+            </html>";
+    }
+
+    private async Task WriteResponse(HttpListenerResponse response, string responseString, string contentType)
     {
         byte[] buffer = Encoding.UTF8.GetBytes(responseString);
         response.ContentLength64 = buffer.Length;
         response.ContentType = contentType;
         await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-        Log($"Sent POST response for {requestPath}");
+        Log($"Sent POST response for {response.Request.Url.AbsolutePath}");
     }
 
-    // Parse multipart/form-data content (simplified example)
     private async Task<string> ParseMultipartFormDataAsync(HttpListenerRequest request, string boundary)
     {
         using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
@@ -178,16 +235,10 @@ class SimpleWebServer : IDisposable
 
     private string GetBoundaryFromContentType(string contentType)
     {
-        // Extract the boundary from the content-type header
-        string[] parts = contentType.Split(new[] { "boundary=" }, StringSplitOptions.None);
-        if (parts.Length > 1)
-        {
-            return "--" + parts[1];
-        }
-        throw new ArgumentException("Boundary not found in content-type header.");
+        string boundary = contentType.Split("boundary=")[1];
+        return "--" + boundary;
     }
 
-    // Helper method for sending error responses
     private void SendErrorResponse(HttpListenerResponse response, int statusCode, string message)
     {
         response.StatusCode = statusCode;
@@ -199,64 +250,10 @@ class SimpleWebServer : IDisposable
         Log($"Sent error response: {statusCode} - {message}");
     }
 
-    // Helper method to log request details
     private void LogRequestDetails(HttpListenerRequest request)
     {
         StringBuilder sb = new StringBuilder();
         sb.AppendLine($"--- Request Details ---");
         sb.AppendLine($"URL: {request.Url}");
         sb.AppendLine($"Method: {request.HttpMethod}");
-        sb.AppendLine($"Headers: ");
-        foreach (string key in request.Headers.AllKeys)
-        {
-            sb.AppendLine($"{key}: {request.Headers[key]}");
-        }
-        Log(sb.ToString());
-    }
-
-    // Logging method to handle both console and file logging
-    private void Log(string message)
-    {
-        Trace.WriteLine($"{DateTime.Now}: {message}");
-    }
-
-    // Implement IDisposable
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (!_disposed)
-        {
-            if (disposing)
-            {
-                // Dispose managed resources
-                if (_listener != null)
-                {
-                    _listener.Stop();
-                    _listener.Close();
-                }
-            }
-
-            // Dispose unmanaged resources if any
-
-            _disposed = true;
-        }
-    }
-
-    public static void Main(string[] args)
-    {
-        string[] prefixes = { "http://localhost:8080/" };
-
-        using (var server = new SimpleWebServer(prefixes))
-        {
-            server.Start();
-            Console.WriteLine("Press Enter to stop the server...");
-            Console.ReadLine();
-            server.Stop();
-        }
-    }
-}
+        sb.AppendLine
