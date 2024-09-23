@@ -1,24 +1,3 @@
-To create a web UI for managing the features of the web server, we will need to extend the server's capabilities to serve dynamic HTML content. This web UI will allow you to manage features like:
-
-1. **Starting/Stopping the Server**: Control the server's state (running or stopped).
-2. **Viewing and Clearing Logs**: Display logs, and provide the ability to clear them.
-3. **Uploading and Managing Files**: Provide a file upload feature (via a form).
-4. **Adjusting Server Configuration**: Update the server's listening port or other settings dynamically.
-
-The general idea is to:
-- Create an admin dashboard served on a specific route (e.g., `/admin`).
-- Provide various functionalities like log viewing, server control, and configuration updates via this dashboard.
-- Implement form handling and file upload mechanisms to interact with the server.
-
-### Plan:
-1. Add a new route `/admin` to serve the UI.
-2. Create a basic HTML template for the admin dashboard.
-3. Provide functionality to view logs, stop/start the server, and upload files through this dashboard.
-4. Adjust the backend to handle these interactions (e.g., POST requests for server control).
-
-### **Updated Code with Admin Web UI:**
-
-```csharp
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -26,7 +5,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using System.Web; // For form-data parsing
+using System.Web;
 
 class SimpleWebServer
 {
@@ -40,6 +19,7 @@ class SimpleWebServer
             throw new NotSupportedException("HttpListener is not supported on this system.");
         }
 
+        // Add prefixes for HTTP and HTTPS
         foreach (string prefix in prefixes)
         {
             _listener.Prefixes.Add(prefix);
@@ -256,4 +236,31 @@ class SimpleWebServer
         sb.AppendLine($"--- Request Details ---");
         sb.AppendLine($"URL: {request.Url}");
         sb.AppendLine($"Method: {request.HttpMethod}");
-        sb.AppendLine
+        sb.AppendLine($"Headers: ");
+        foreach (string key in request.Headers.AllKeys)
+        {
+            sb.AppendLine($"{key}: {request.Headers[key]}");
+        }
+        Log(sb.ToString());
+    }
+
+    // Logging method to handle both console and file logging
+    private void Log(string message)
+    {
+        Trace.WriteLine($"{DateTime.Now}: {message}");
+    }
+
+    public static void Main(string[] args)
+    {
+        // Prefixes for HTTP and HTTPS
+        string[] prefixes = { "http://localhost:8080/", "https://localhost:8443/" };
+
+        using (var server = new SimpleWebServer(prefixes))
+        {
+            server.Start();
+            Console.WriteLine("Press Enter to stop the server...");
+            Console.ReadLine();
+            server.Stop();
+        }
+    }
+}
