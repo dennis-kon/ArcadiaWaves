@@ -6,8 +6,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Web;
+using System.Collections.Generic;
 
-class SimpleWebServer
+public class SimpleWebServer : IDisposable
 {
     private readonly HttpListener _listener = new HttpListener();
     private readonly string logFilePath = "webserver.log"; // Log file path
@@ -45,6 +46,11 @@ class SimpleWebServer
         Log("Web server stopped.");
     }
 
+    public void Dispose()
+    {
+        Stop();
+    }
+
     private async Task HandleIncomingConnections()
     {
         while (_listener.IsListening)
@@ -60,11 +66,11 @@ class SimpleWebServer
 
                 if (request.HttpMethod == "GET")
                 {
-                    await HandleGetRequest(request, response);
+                    await HandleGetRequest(context, response);
                 }
                 else if (request.HttpMethod == "POST")
                 {
-                    await HandlePostRequest(request, response);
+                    await HandlePostRequest(context, response);
                 }
                 else
                 {
@@ -80,10 +86,10 @@ class SimpleWebServer
         }
     }
 
-    private async Task HandleGetRequest(HttpListenerRequest request, HttpListenerResponse response)
+    private async Task HandleGetRequest(HttpListenerContext context, HttpListenerResponse response)
     {
         string responseString;
-        switch (request.Url.AbsolutePath)
+        switch (context.Request.Url.AbsolutePath)
         {
             case "/":
                 responseString = "<html><body><h1>Home Page - GET</h1></body></html>";
@@ -114,16 +120,16 @@ class SimpleWebServer
         response.ContentLength64 = buffer.Length;
         response.ContentType = "text/html";
         await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-        Log($"Sent GET response for {request.Url.AbsolutePath}");
+        Log($"Sent GET response for {context.Request.Url.AbsolutePath}");
     }
 
-    private async Task HandlePostRequest(HttpListenerRequest request, HttpListenerResponse response)
+    private async Task HandlePostRequest(HttpListenerContext context, HttpListenerResponse response)
     {
-        if (request.Url.AbsolutePath == "/admin/action")
+        if (context.Request.Url.AbsolutePath == "/admin/action")
         {
             string responseString;
 
-            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
             {
                 string body = await reader.ReadToEndAsync();
                 var formData = HttpUtility.ParseQueryString(body);
@@ -143,11 +149,11 @@ class SimpleWebServer
                 }
             }
         }
-        else if (request.Url.AbsolutePath == "/contact")
+        else if (context.Request.Url.AbsolutePath == "/contact")
         {
-            if (request.ContentType == "application/json")
+            if (context.Request.ContentType == "application/json")
             {
-                using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
                 {
                     string body = await reader.ReadToEndAsync();
                     Log($"Received JSON data: {body}");
@@ -157,10 +163,10 @@ class SimpleWebServer
                     await WriteResponse(response, responseString, "text/html");
                 }
             }
-            else if (request.ContentType.Contains("multipart/form-data"))
+            else if (context.Request.ContentType.Contains("multipart/form-data"))
             {
-                var boundary = GetBoundaryFromContentType(request.ContentType);
-                var multipartFormData = await ParseMultipartFormDataAsync(request, boundary);
+                var boundary = GetBoundaryFromContentType(context.Request.ContentType);
+                var multipartFormData = await ParseMultipartFormDataAsync(context.Request, boundary);
                 Log($"Received multipart form-data: {multipartFormData}");
 
                 string responseString = $"<html><body><h1>Form Data Received</h1><pre>{multipartFormData}</pre></body></html>";
@@ -201,7 +207,8 @@ class SimpleWebServer
         response.ContentLength64 = buffer.Length;
         response.ContentType = contentType;
         await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-        Log($"Sent POST response for {response.Request.Url.AbsolutePath}");
+        Log($"Sent POST response for {context.Request.Url.AbsolutePath}"); // Correct
+
     }
 
     private async Task<string> ParseMultipartFormDataAsync(HttpListenerRequest request, string boundary)
@@ -215,7 +222,7 @@ class SimpleWebServer
 
     private string GetBoundaryFromContentType(string contentType)
     {
-        string boundary = contentType.Split("boundary=")[1];
+        string boundary = contentType.Split(new[] { "boundary=" }, StringSplitOptions.None)[1];
         return "--" + boundary;
     }
 
@@ -255,12 +262,10 @@ class SimpleWebServer
         // Prefixes for HTTP and HTTPS
         string[] prefixes = { "http://localhost:8080/", "https://localhost:8443/" };
 
-        using (var server = new SimpleWebServer(prefixes))
-        {
-            server.Start();
-            Console.WriteLine("Press Enter to stop the server...");
-            Console.ReadLine();
-            server.Stop();
-        }
+        SimpleWebServer server = new SimpleWebServer(prefixes);
+        server.Start();
+        Console.WriteLine("Press Enter to stop the server...");
+        Console.ReadLine();
+        server.Stop();
     }
 }
